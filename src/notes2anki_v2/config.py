@@ -19,6 +19,13 @@ def _to_int(value: str | None, default: int, name: str) -> int:
     return parsed
 
 
+def _normalize_base_url(value: str) -> str:
+    cleaned = value.strip().rstrip("/")
+    if cleaned in {"https://api.vectorengine.ai", "http://api.vectorengine.ai"}:
+        return f"{cleaned}/v1"
+    return cleaned
+
+
 @dataclass(frozen=True)
 class Settings:
     openai_api_key: str
@@ -46,7 +53,7 @@ class Settings:
 
         return cls(
             openai_api_key=os.getenv("OPENAI_API_KEY", "").strip(),
-            base_url=os.getenv("BASE_URL", "https://api.openai.com/v1").strip(),
+            base_url=_normalize_base_url(os.getenv("BASE_URL", "https://api.openai.com/v1")),
             model_name=os.getenv("MODEL_NAME", "gpt-4o-mini").strip(),
             anki_url=os.getenv("ANKI_URL", "http://127.0.0.1:8765").strip(),
             default_deck_name=os.getenv("DEFAULT_DECK_NAME", "Default").strip() or "Default",

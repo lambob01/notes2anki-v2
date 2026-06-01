@@ -60,7 +60,7 @@ class CardGenerator:
                 max_tokens=1800,
                 timeout=120,
             )
-            return response.choices[0].message.content or ""
+            return _response_text(response)
         except Exception as exc:
             raise AiError(f"Could not generate global lecture context: {exc}") from exc
 
@@ -94,7 +94,7 @@ class CardGenerator:
                     max_tokens=4000,
                     timeout=120,
                 )
-                raw = response.choices[0].message.content or ""
+                raw = _response_text(response)
                 card_dicts = extract_cards_json(raw)
                 return [
                     Card.from_mapping(item, image_path, source_filename, slide_index)
@@ -134,6 +134,33 @@ def extract_cards_json(raw_text: str) -> list[dict[str, Any]]:
             continue
 
     raise AiError("The AI returned text that was not valid JSON.")
+
+
+def _response_text(response: Any) -> str:
+    if isinstance(response, str):
+        return response
+    choices = getattr(response, "choices", None)
+    if choices:
+        message = getattr(choices[0], "message", None)
+        content = getattr(message, "content", None)
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return "".join(
+                item.get("text", "") if isinstance(item, dict) else str(item)
+                for item in content
+            )
+    if isinstance(response, dict):
+        choices = response.get("choices")
+        if isinstance(choices, list) and choices:
+            message = choices[0].get("message", {}) if isinstance(choices[0], dict) else {}
+            content = message.get("content") if isinstance(message, dict) else None
+            if isinstance(content, str):
+                return content
+        content = response.get("content")
+        if isinstance(content, str):
+            return content
+    raise AiError(f"Unexpected AI response format: {type(response).__name__}")
 
 
 def _coerce_cards(parsed: Any) -> list[dict[str, Any]]:
