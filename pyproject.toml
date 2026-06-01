@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "notes2anki-v2"
+version = "0.1.0"
+description = "Convert PDF, PPTX, and image lecture material into Anki flashcards."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Notes2Anki contributors" }]
+license = { text = "MIT" }
+dependencies = [
+  "click>=8.1",
+  "openai>=1.0",
+  "pillow>=10.0",
+  "pymupdf>=1.23",
+  "python-dotenv>=1.0",
+  "python-pptx>=0.6.23",
+  "requests>=2.31",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+]
+
+[project.scripts]
+notes2anki-v2 = "notes2anki_v2.cli:cli"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.pytest.ini_options]
+addopts = "-q -p no:cacheprovider"
