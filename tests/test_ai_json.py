@@ -19,3 +19,27 @@ def test_extract_cards_json_repairs_common_latex_backslashes() -> None:
 
 def test_response_text_accepts_plain_string_provider_response() -> None:
     assert _response_text('{"cards":[]}') == '{"cards":[]}'
+
+
+def test_extract_cards_json_repairs_nabla_and_cdot() -> None:
+    raw = '{"cards":[{"prompt":"P","answer":"","formula":"\\nabla \\cdot E"}]}'
+
+    cards = extract_cards_json(raw)
+
+    assert cards[0]["formula"] == "\\nabla \\cdot E"
+
+
+def test_extract_cards_json_repairs_truncated_payload() -> None:
+    raw = '{"cards":[{"prompt":"Q","answer":"A"}'
+
+    cards = extract_cards_json(raw)
+
+    assert cards == [{"prompt": "Q", "answer": "A"}]
+
+
+def test_extract_cards_json_accepts_bare_list() -> None:
+    raw = '[{"prompt":"Q","answer":"A"}]'
+
+    cards = extract_cards_json(raw)
+
+    assert cards == [{"prompt": "Q", "answer": "A"}]

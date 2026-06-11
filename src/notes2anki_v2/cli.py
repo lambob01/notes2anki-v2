@@ -10,6 +10,7 @@ from notes2anki_v2.anki import AnkiClient, AnkiError
 from notes2anki_v2.config import Settings
 from notes2anki_v2.console import Console
 from notes2anki_v2.files import SUPPORTED_EXTENSIONS, is_supported, wait_for_file_stability
+from notes2anki_v2.models import ProcessingSummary
 from notes2anki_v2.pipeline import Processor
 
 
@@ -48,7 +49,8 @@ def cli() -> None:
 @click.argument("file_path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
 @click.option("--deck", help="Anki deck name. Defaults to DEFAULT_DECK_NAME from .env.")
 @click.option("--note-type", help="Anki note type/model. Defaults to DEFAULT_NOTE_TYPE from .env.")
-def convert(file_path: Path, deck: str | None, note_type: str | None) -> None:
+@click.option("--debug", is_flag=True, help="Show full tracebacks for unexpected errors.")
+def convert(file_path: Path, deck: str | None, note_type: str | None, debug: bool) -> None:
     """Convert one PDF, PPTX, or image file and upload cards to Anki."""
     console = Console()
     settings = _settings()
@@ -63,9 +65,11 @@ def convert(file_path: Path, deck: str | None, note_type: str | None) -> None:
     except AnkiError as exc:
         raise click.ClickException(f"Anki error: {exc}") from exc
     except Exception as exc:
-        raise click.ClickException(f"Unexpected error: {exc}") from exc
+        if debug:
+            raise
+        raise click.ClickException(f"Unexpected error: {exc} (re-run with --debug for details)") from exc
 
-    _print_summary(summary.added, summary.generated, summary.messages, console)
+    _print_summary(summary, console)
 
 
 @cli.command()
@@ -85,12 +89,14 @@ def convert(file_path: Path, deck: str | None, note_type: str | None) -> None:
     is_flag=True,
     help="Keep source files after successful processing instead of deleting them.",
 )
+@click.option("--debug", is_flag=True, help="Show full tracebacks for unexpected errors.")
 def watch(
     directory: Path,
     deck: str | None,
     note_type: str | None,
     interval: int | None,
     keep_files: bool,
+    debug: bool,
 ) -> None:
     """Watch a folder and process files as they appear."""
     console = Console()
@@ -123,9 +129,15 @@ def watch(
                 if not wait_for_file_stability(file_path):
                     console.warn(f"Skipping {file_path.name}: file is still changing or cannot be read.")
                     continue
-                summary = processor.process_file(file_path, deck_name, note_model)
+                try:
+                    summary = processor.process_file(file_path, deck_name, note_model)
+                except Exception as exc:
+                    if debug:
+                        raise
+                    console.error(f"Failed to process {file_path.name}: {exc}")
+                    continue
                 session_added += summary.added
-                _print_summary(summary.added, summary.generated, summary.messages, console)
+                _print_summary(summary, console)
                 if summary.completed and not keep_files:
                     try:
                         file_path.unlink()
@@ -137,12 +149,14 @@ def watch(
         console.success(f"\nStopped. Added {session_added} card(s) this session.")
 
 
-def _print_summary(added: int, generated: int, messages: list[str], console: Console) -> None:
-    if added:
-        console.success(f"Done. Added {added} card(s) to Anki.")
-    elif generated:
+def _print_summary(summary: ProcessingSummary, console: Console) -> None:
+    if summary.added:
+        console.success(f"Done. Added {summary.added} card(s) to Anki.")
+    elif summary.generated:
         console.warn("Cards were generated, but none were added to Anki.")
     else:
         console.warn("Done. No cards were added.")
-    for message in messages:
+    if summary.duplicates:
+        console.muted(f"Skipped {summary.duplicates} duplicate card(s) already in Anki.")
+    for message in summary.messages:
         console.warn(f"- {message}")

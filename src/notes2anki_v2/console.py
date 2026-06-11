@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+from typing import Iterable, Sequence
+
 import click
 
 
 class Console:
+    def progress(self, items: Sequence | Iterable, label: str):
+        return click.progressbar(items, label=label, show_pos=True)
+
     def info(self, message: str) -> None:
         click.secho(message, fg="cyan")
 

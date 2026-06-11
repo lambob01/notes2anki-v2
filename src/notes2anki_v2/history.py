@@ -36,10 +36,14 @@ class HistoryStore:
         self.path.write_text(json.dumps(items, indent=2), encoding="utf-8")
 
 
-def slide_id(path: Path, slide_index: int) -> str:
+def file_digest(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
-    return f"{digest.hexdigest()}::{slide_index}"
+    return digest.hexdigest()
+
+
+def slide_id(digest: str, slide_index: int) -> str:
+    return f"{digest}::{slide_index}"
 

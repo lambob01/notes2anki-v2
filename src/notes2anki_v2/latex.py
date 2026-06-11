@@ -10,12 +10,13 @@ def clean_latex(text: object) -> str:
     cleaned = re.sub(r"</?anki-mathjax[^>]*>", "", cleaned, flags=re.IGNORECASE | re.DOTALL)
     cleaned = re.sub(r"&lt;/?anki-mathjax.*?&gt;", "", cleaned, flags=re.IGNORECASE | re.DOTALL)
     cleaned = re.sub(r"\\?</?anki-mathjax.*?\\?>", "", cleaned, flags=re.IGNORECASE | re.DOTALL)
-    cleaned = cleaned.replace("<->", r"\leftrightarrow").replace("->", r"\rightarrow")
     return cleaned.strip()
 
 
 def format_formula(formula: object) -> str:
     cleaned = clean_latex(formula)
+    # Arrow shorthand is only meaningful inside MathJax-rendered formulas.
+    cleaned = cleaned.replace("<->", r"\leftrightarrow").replace("->", r"\rightarrow")
     cleaned = cleaned.replace(r"\\[", r"\[").replace(r"\\]", r"\]")
     cleaned = cleaned.replace(r"\\(", r"\(").replace(r"\\)", r"\)")
     if cleaned and not cleaned.startswith((r"\[", "$$")):

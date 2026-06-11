@@ -4,23 +4,13 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-import click
-
 from notes2anki_v2.ai import AiError, CardGenerator
 from notes2anki_v2.anki import AnkiClient, AnkiError
 from notes2anki_v2.config import Settings
 from notes2anki_v2.console import Console
-from notes2anki_v2.documents import (
-    DocumentError,
-    get_document_text_summary,
-    get_slide_notes,
-    looks_like_title_or_blank,
-    normalize_image_to_jpeg,
-    pdf_to_images,
-    pptx_to_images,
-)
-from notes2anki_v2.files import SUPPORTED_IMAGE_EXTENSIONS, is_supported, wait_for_file_stability
-from notes2anki_v2.history import HistoryStore, slide_id
+from notes2anki_v2.documents import Document, DocumentError, open_document
+from notes2anki_v2.files import is_supported
+from notes2anki_v2.history import HistoryStore, file_digest, slide_id
 from notes2anki_v2.models import Card, ProcessingSummary, Slide
 
 
@@ -51,15 +41,14 @@ class Processor:
         if not is_supported(path):
             summary.messages.append(f"Unsupported file type: {path.suffix or '(no extension)'}")
             return summary
-        if not wait_for_file_stability(path):
-            summary.messages.append("File did not finish copying or could not be read.")
-            return summary
 
         self.console.info(f"\nProcessing {path.name}")
+        digest = file_digest(path)
+        document = open_document(path)
         with tempfile.TemporaryDirectory(prefix="notes2anki_v2_") as tmp:
             tmp_dir = Path(tmp)
             try:
-                slides = self._prepare_slides(path, tmp_dir, summary)
+                slides = self._prepare_slides(document, digest, tmp_dir, summary)
             except DocumentError as exc:
                 summary.messages.append(str(exc))
                 return summary
@@ -69,7 +58,7 @@ class Processor:
                 return summary
 
             global_context = ""
-            document_text = get_document_text_summary(path)
+            document_text = document.text_summary()
             if document_text.strip():
                 self.console.info("Analyzing the whole document for context...")
                 try:
@@ -83,60 +72,50 @@ class Processor:
             if not cards:
                 summary.messages.append("No flashcards were generated.")
                 if summary.failed_slides == 0:
-                    self._mark_slides_processed(path, slides)
+                    self._mark_slides_processed(digest, slides)
                     summary.completed = True
                 return summary
 
             self.console.info(f"Uploading {len(cards)} card(s) to Anki...")
-            with click.progressbar(cards, label="Uploading", show_pos=True) as bar:
+            with self.console.progress(cards, label="Uploading") as bar:
                 for card in bar:
                     try:
                         if self.anki.add_card(card, deck_name, note_type):
                             summary.added += 1
+                        else:
+                            summary.duplicates += 1
                     except AnkiError as exc:
                         summary.messages.append(f"Anki rejected a card: {exc}")
 
-            self._mark_slides_processed(path, slides)
-            summary.completed = summary.added == len(cards)
+            self._mark_slides_processed(digest, slides)
+            # Duplicates count as handled: the card already exists in Anki.
+            summary.completed = (summary.added + summary.duplicates) == len(cards)
             return summary
 
     def _prepare_slides(
-        self, source: Path, tmp_dir: Path, summary: ProcessingSummary
+        self, document: Document, digest: str, tmp_dir: Path, summary: ProcessingSummary
     ) -> list[Slide]:
-        extension = source.suffix.lower()
-        if extension in SUPPORTED_IMAGE_EXTENSIONS:
-            image = normalize_image_to_jpeg(source, tmp_dir)
-            return [Slide(index=0, image_path=image, source_filename=source.name)]
-        if extension == ".pdf":
-            images = pdf_to_images(source, tmp_dir, self.settings.dpi)
-        elif extension == ".pptx":
-            images = pptx_to_images(source, tmp_dir, self.settings.dpi)
-        else:
-            return []
+        images = document.render_images(tmp_dir, self.settings.dpi, warn=self.console.warn)
 
         slides: list[Slide] = []
         for index, image_path in enumerate(images):
-            sid = slide_id(source, index)
-            if self.history.contains(sid):
+            if self.history.contains(slide_id(digest, index)):
                 summary.skipped_already_processed += 1
                 self.console.muted(f"Slide {index + 1}: already processed")
                 continue
-            if looks_like_title_or_blank(source, index):
+            if document.is_title_or_blank(index):
                 summary.skipped_title_or_blank += 1
-                self.history.add(sid)
                 self.console.muted(f"Slide {index + 1}: title or blank slide skipped")
                 continue
             slides.append(
                 Slide(
                     index=index,
                     image_path=image_path,
-                    notes=get_slide_notes(source, index),
-                    source_filename=source.name,
+                    notes=document.slide_notes(index),
+                    source_filename=document.path.name,
                 )
             )
 
-        if summary.skipped_title_or_blank:
-            self.history.save()
         self.console.info(f"{len(slides)} slide(s) ready for AI generation.")
         return slides
 
@@ -173,9 +152,9 @@ class Processor:
                     summary.messages.append(str(exc))
                     self.console.warn(str(exc))
 
-        return sorted(cards, key=lambda card: card.slide_index if card.slide_index is not None else 999999)
+        return sorted(cards, key=lambda card: card.slide_index or 0)
 
-    def _mark_slides_processed(self, source: Path, slides: list[Slide]) -> None:
+    def _mark_slides_processed(self, digest: str, slides: list[Slide]) -> None:
         for slide in slides:
-            self.history.add(slide_id(source, slide.index))
+            self.history.add(slide_id(digest, slide.index))
         self.history.save()

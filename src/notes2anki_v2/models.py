@@ -39,13 +39,16 @@ class Card:
         )
 
     def is_usable(self) -> bool:
-        return bool(self.prompt or self.answer or self.formula or self.example_question)
+        # Prompt is the duplicate-detection field in Anki and the card front;
+        # RECOMMENDATION cards legitimately carry only a prompt.
+        return bool(self.prompt)
 
 
 @dataclass
 class ProcessingSummary:
     source: Path
     added: int = 0
+    duplicates: int = 0
     generated: int = 0
     completed: bool = False
     skipped_title_or_blank: int = 0

@@ -3,8 +3,9 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 
 
 def _to_int(value: str | None, default: int, name: str) -> int:
@@ -21,9 +22,20 @@ def _to_int(value: str | None, default: int, name: str) -> int:
 
 def _normalize_base_url(value: str) -> str:
     cleaned = value.strip().rstrip("/")
-    if cleaned in {"https://api.vectorengine.ai", "http://api.vectorengine.ai"}:
+    if not cleaned:
+        return cleaned
+    parsed = urlparse(cleaned)
+    # OpenAI-compatible APIs live under /v1; add it when the URL has no path.
+    if parsed.scheme in {"http", "https"} and not parsed.path:
         return f"{cleaned}/v1"
     return cleaned
+
+
+def _default_history_file() -> Path:
+    legacy = Path.cwd() / ".notes2anki_v2" / "processed_slides.json"
+    if legacy.exists():
+        return legacy
+    return Path.home() / ".notes2anki_v2" / "processed_slides.json"
 
 
 @dataclass(frozen=True)
@@ -41,15 +53,9 @@ class Settings:
 
     @classmethod
     def load(cls) -> "Settings":
-        cwd_env = Path.cwd() / ".env"
-        if cwd_env.exists():
-            load_dotenv(cwd_env)
-        else:
-            load_dotenv()
+        load_dotenv(find_dotenv(usecwd=True))
 
-        project_root = Path.cwd()
-        data_dir = project_root / ".notes2anki_v2"
-        history_file = Path(os.getenv("HISTORY_FILE", str(data_dir / "processed_slides.json")))
+        history_file = Path(os.getenv("HISTORY_FILE", str(_default_history_file())))
 
         return cls(
             openai_api_key=os.getenv("OPENAI_API_KEY", "").strip(),

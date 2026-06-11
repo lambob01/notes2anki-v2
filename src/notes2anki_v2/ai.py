@@ -3,12 +3,25 @@ from __future__ import annotations
 import base64
 import json
 import re
+import time
 from pathlib import Path
 from typing import Any
 
-from openai import OpenAI
+from openai import (
+    AuthenticationError,
+    BadRequestError,
+    NotFoundError,
+    OpenAI,
+    PermissionDeniedError,
+)
 
 from notes2anki_v2.models import Card
+
+MAX_ATTEMPTS = 3
+RETRY_BASE_DELAY_SECONDS = 2
+REQUEST_TIMEOUT_SECONDS = 120
+
+_FATAL_API_ERRORS = (AuthenticationError, PermissionDeniedError, NotFoundError)
 
 
 CARD_PROMPT = """You are an expert educator and spaced repetition card writer.
@@ -44,6 +57,7 @@ class CardGenerator:
             )
         self.client = OpenAI(api_key=api_key, base_url=base_url)
         self.model_name = model_name
+        self._json_mode = True
 
     def generate_global_context(self, document_text: str) -> str:
         if not document_text.strip():
@@ -58,7 +72,7 @@ class CardGenerator:
                 model=self.model_name,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=1800,
-                timeout=120,
+                timeout=REQUEST_TIMEOUT_SECONDS,
             )
             return _response_text(response)
         except Exception as exc:
@@ -86,13 +100,17 @@ class CardGenerator:
             content.append({"type": "text", "text": f"Speaker notes:\n{notes}"})
 
         last_error = ""
-        for attempt in range(1, 4):
+        for attempt in range(1, MAX_ATTEMPTS + 1):
+            request_kwargs: dict[str, Any] = {}
+            if self._json_mode:
+                request_kwargs["response_format"] = {"type": "json_object"}
             try:
                 response = self.client.chat.completions.create(
                     model=self.model_name,
                     messages=[{"role": "user", "content": content}],
                     max_tokens=4000,
-                    timeout=120,
+                    timeout=REQUEST_TIMEOUT_SECONDS,
+                    **request_kwargs,
                 )
                 raw = _response_text(response)
                 card_dicts = extract_cards_json(raw)
@@ -101,10 +119,23 @@ class CardGenerator:
                     for item in card_dicts
                     if isinstance(item, dict)
                 ]
+            except _FATAL_API_ERRORS as exc:
+                raise AiError(
+                    f"AI card generation failed for slide {slide_index + 1}: {exc}"
+                ) from exc
+            except BadRequestError as exc:
+                if self._json_mode:
+                    # Some OpenAI-compatible providers reject response_format.
+                    self._json_mode = False
+                    last_error = str(exc)
+                    continue
+                raise AiError(
+                    f"AI card generation failed for slide {slide_index + 1}: {exc}"
+                ) from exc
             except Exception as exc:
                 last_error = str(exc)
-                if attempt == 3:
-                    break
+            if attempt < MAX_ATTEMPTS:
+                time.sleep(RETRY_BASE_DELAY_SECONDS * attempt)
         raise AiError(f"AI card generation failed for slide {slide_index + 1}: {last_error}")
 
 
@@ -178,10 +209,14 @@ def _coerce_cards(parsed: Any) -> list[dict[str, Any]]:
 
 
 def _escape_common_bad_latex_backslashes(text: str) -> str:
+    # Best-effort fallback for providers without JSON mode. Valid JSON escapes
+    # (\b \f \n \r \t \u) that are actually mangled LaTeX commands can only be
+    # detected by whitelist, since e.g. a literal \n followed by text is common.
     text = re.sub(r'(?<!\\)\\([^"\\/bfnrtu])', r"\\\\\1", text)
-    text = re.sub(r"(?<!\\)\\f(?=rac)", r"\\\\f", text)
-    text = re.sub(r"(?<!\\)\\b(?=egin|eta)", r"\\\\b", text)
-    text = re.sub(r"(?<!\\)\\n(?=u|abla)", r"\\\\n", text)
-    text = re.sub(r"(?<!\\)\\t(?=heta|au|ilde|imes)", r"\\\\t", text)
-    text = re.sub(r"(?<!\\)\\r(?=ho|ight)", r"\\\\r", text)
+    text = re.sub(r"(?<!\\)\\u(?![0-9a-fA-F]{4})", r"\\\\u", text)
+    text = re.sub(r"(?<!\\)\\f(?=rac|orall)", r"\\\\f", text)
+    text = re.sub(r"(?<!\\)\\b(?=egin|eta|ar\b|inom|oxed|ig)", r"\\\\b", text)
+    text = re.sub(r"(?<!\\)\\n(?=u\b|abla|eq\b|ot\\)", r"\\\\n", text)
+    text = re.sub(r"(?<!\\)\\t(?=heta|au\b|ilde|imes|ext\{|o\b)", r"\\\\t", text)
+    text = re.sub(r"(?<!\\)\\r(?=ho\b|ight|angle)", r"\\\\r", text)
     return text

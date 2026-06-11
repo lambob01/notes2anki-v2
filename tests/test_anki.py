@@ -51,3 +51,32 @@ def test_build_note_uses_required_anki_fields() -> None:
     assert note["modelName"] == "Notes2Anki"
     assert note["fields"]["formula"] == r"\[ x=y \]"
     assert note["fields"]["extra"] == '<img src="slide.jpg">'
+
+
+def test_build_note_escapes_html_in_model_output() -> None:
+    card = Card(
+        prompt='What is <script>alert("x")</script>?',
+        answer="a < b",
+    )
+
+    note = build_note(card, "slide.jpg", "Deck", "Notes2Anki")
+
+    assert "<script>" not in note["fields"]["prompt"]
+    assert "&lt;script&gt;" in note["fields"]["prompt"]
+    assert note["fields"]["answer"] == "a &lt; b"
+    assert note["fields"]["extra"] == '<img src="slide.jpg">'
+
+
+def test_add_card_returns_false_for_duplicates(tmp_path) -> None:
+    class DuplicateRejectingClient(AnkiClient):
+        def invoke(self, action: str, **params: object) -> object:
+            if action == "addNote":
+                raise AnkiError("cannot create note because it is a duplicate")
+            return None
+
+    image = tmp_path / "slide.jpg"
+    image.write_bytes(b"fake image data")
+    card = Card(prompt="Q", answer="A", image_path=image)
+    client = DuplicateRejectingClient("http://example.invalid")
+
+    assert client.add_card(card, "Deck", "Notes2Anki") is False
