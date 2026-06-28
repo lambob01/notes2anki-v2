@@ -17,7 +17,7 @@ The original `notes2anki` prototype should be treated only as a logic reference.
 ## Local Path
 
 ```text
-D:\uni\codex project\anki automator\notes2anki_v2
+D:\uni\codex project\notes2anki-v2
 ```
 
 ## Main Commands

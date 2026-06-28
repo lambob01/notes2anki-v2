@@ -93,6 +93,14 @@ Use defaults from `.env`:
 notes2anki-v2 convert path/to/lecture.pptx
 ```
 
+Pick a model for a single run with `--model`. It overrides `MODEL_NAME` and is sent
+to your configured `BASE_URL`, so the model must be one your provider/endpoint serves:
+
+```bash
+notes2anki-v2 convert path/to/lecture.pdf --model gpt-5.5
+notes2anki-v2 convert path/to/lecture.pdf --model gemini-2.5-pro
+```
+
 Watch a folder:
 
 ```bash
@@ -127,7 +135,7 @@ Environment variables:
 | --- | --- | --- |
 | `OPENAI_API_KEY` | empty | Required API key |
 | `BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible API base URL |
-| `MODEL_NAME` | `gpt-4o-mini` | Vision-capable model |
+| `MODEL_NAME` | `gpt-4o-mini` | Vision-capable model (override per run with `--model`) |
 | `ANKI_URL` | `http://127.0.0.1:8765` | AnkiConnect URL |
 | `DEFAULT_DECK_NAME` | `Default` | Default Anki deck |
 | `DEFAULT_NOTE_TYPE` | `Notes2Anki` | Default Anki note type |

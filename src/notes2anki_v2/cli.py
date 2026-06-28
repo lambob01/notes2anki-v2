@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import click
@@ -21,7 +22,15 @@ def _settings() -> Settings:
         raise click.ClickException(str(exc)) from exc
 
 
-def _processor(settings: Settings, console: Console) -> Processor:
+def _resolve_settings(settings: Settings, model: str | None) -> Settings:
+    """Apply CLI overrides on top of env/.env settings. A CLI flag always wins."""
+    if model and model.strip():
+        return replace(settings, model_name=model.strip())
+    return settings
+
+
+def _processor(settings: Settings, console: Console, model: str | None = None) -> Processor:
+    settings = _resolve_settings(settings, model)
     anki = AnkiClient(settings.anki_url)
     if not anki.is_running():
         raise click.ClickException(
@@ -36,6 +45,7 @@ def _processor(settings: Settings, console: Console) -> Processor:
         )
     except AiError as exc:
         raise click.ClickException(str(exc)) from exc
+    console.muted(f"Model: {settings.model_name}")
     return Processor(settings=settings, anki=anki, generator=generator, console=console)
 
 
@@ -49,14 +59,15 @@ def cli() -> None:
 @click.argument("file_path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
 @click.option("--deck", help="Anki deck name. Defaults to DEFAULT_DECK_NAME from .env.")
 @click.option("--note-type", help="Anki note type/model. Defaults to DEFAULT_NOTE_TYPE from .env.")
+@click.option("--model", "model", metavar="NAME", help="AI model to use. Overrides MODEL_NAME from .env.")
 @click.option("--debug", is_flag=True, help="Show full tracebacks for unexpected errors.")
-def convert(file_path: Path, deck: str | None, note_type: str | None, debug: bool) -> None:
+def convert(file_path: Path, deck: str | None, note_type: str | None, model: str | None, debug: bool) -> None:
     """Convert one PDF, PPTX, or image file and upload cards to Anki."""
     console = Console()
     settings = _settings()
     deck_name = deck or settings.default_deck_name
     note_model = note_type or settings.default_note_type
-    processor = _processor(settings, console)
+    processor = _processor(settings, console, model=model)
 
     try:
         processor.anki.ensure_deck_exists(deck_name)
@@ -83,6 +94,7 @@ def convert(file_path: Path, deck: str | None, note_type: str | None, debug: boo
 )
 @click.option("--deck", help="Anki deck name. Defaults to DEFAULT_DECK_NAME from .env.")
 @click.option("--note-type", help="Anki note type/model. Defaults to DEFAULT_NOTE_TYPE from .env.")
+@click.option("--model", "model", metavar="NAME", help="AI model to use. Overrides MODEL_NAME from .env.")
 @click.option("--interval", type=int, help="Seconds between folder scans.")
 @click.option(
     "--keep-files",
@@ -94,6 +106,7 @@ def watch(
     directory: Path,
     deck: str | None,
     note_type: str | None,
+    model: str | None,
     interval: int | None,
     keep_files: bool,
     debug: bool,
@@ -107,7 +120,7 @@ def watch(
     if scan_interval <= 0:
         raise click.ClickException("--interval must be greater than zero.")
 
-    processor = _processor(settings, console)
+    processor = _processor(settings, console, model=model)
     try:
         processor.anki.ensure_deck_exists(deck_name)
         processor.anki.ensure_note_type_exists(note_model)
